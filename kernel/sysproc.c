@@ -89,3 +89,56 @@ sys_uptime(void)
   release(&tickslock);
   return xticks;
 }
+
+
+uint64 
+sys_set_priority(void)
+{
+  int process_id;
+  int process_priority;
+  
+   //set the corresponding values of process_priority and process_id
+   argint(0,&process_priority);
+   argint(1,&process_id);
+
+   if(process_priority < 0 || process_priority > 100)
+  {
+      return -2;
+  }
+  
+   return set_priority(process_priority,process_id);
+
+}
+
+uint64 
+
+sys_set_tickets(void)
+{
+    int tickets;
+
+    argint(0,&tickets);
+
+    return set_tickets(tickets);
+}
+
+
+
+uint64
+sys_waitx(void)
+{
+  uint64 addr, addr1, addr2;
+  uint wtime, rtime;
+  argaddr(0, &addr);
+  argaddr(1, &addr1); // user virtual memory
+  argaddr(2, &addr2);
+  int ret = waitx(addr, &wtime, &rtime);
+  struct proc* p = myproc();
+  if (copyout(p->pagetable, addr1,(char*)&wtime, sizeof(int)) < 0)
+    return -1;
+  if (copyout(p->pagetable, addr2,(char*)&rtime, sizeof(int)) < 0)
+    return -1;
+  return ret;
+}
+
+
+

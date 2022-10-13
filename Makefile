@@ -50,6 +50,8 @@ endif
 
 QEMU = qemu-system-riscv64
 
+SCHEDULER = RR
+
 CC = $(TOOLPREFIX)gcc
 AS = $(TOOLPREFIX)gas
 LD = $(TOOLPREFIX)ld
@@ -64,12 +66,21 @@ CFLAGS += -I.
 CFLAGS += $(shell $(CC) -fno-stack-protector -E -x c /dev/null >/dev/null 2>&1 && echo -fno-stack-protector)
 
 # Disable PIE when possible (for Ubuntu 16.10 toolchain)
+
 ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]no-pie'),)
 CFLAGS += -fno-pie -no-pie
 endif
 ifneq ($(shell $(CC) -dumpspecs 2>/dev/null | grep -e '[^f]nopie'),)
 CFLAGS += -fno-pie -nopie
 endif
+
+
+
+# for implementing different types of schedulers
+CFLAGS += -D $(SCHEDULER)
+
+
+
 
 LDFLAGS = -z max-page-size=4096
 
@@ -132,6 +143,8 @@ UPROGS=\
 	$U/_grind\
 	$U/_wc\
 	$U/_zombie\
+	$U/_setpriority\
+	$U/_time\
 
 fs.img: mkfs/mkfs README $(UPROGS)
 	mkfs/mkfs fs.img README $(UPROGS)

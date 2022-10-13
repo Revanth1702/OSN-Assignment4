@@ -28,6 +28,7 @@ main(int argc, char *argv[])
 
   if(argc <= 1){
     cat(0);
+    printf("hello\n");
     exit(0);
   }
 

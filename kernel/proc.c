@@ -6,11 +6,19 @@
 #include "proc.h"
 #include "defs.h"
 
+
+
 struct cpu cpus[NCPU];
 
 struct proc proc[NPROC];
 
 struct proc *initproc;
+
+struct Queue QueueLevel[QUEUE_COUNT];
+
+//scheduling details
+int scheduler_number = 0;
+int stat_c=-1;
 
 int nextpid = 1;
 struct spinlock pid_lock;
@@ -57,6 +65,8 @@ procinit(void)
       p->kstack = KSTACK((int) (p - proc));
   }
 }
+
+
 
 // Must be called with interrupts disabled,
 // to prevent race with process being moved
@@ -122,9 +132,20 @@ allocproc(void)
   return 0;
 
 found:
+  p->creation_time = ticks;
+  p->static_priority = DEFAULT_PRIORITY;
   p->pid = allocpid();
   p->state = USED;
-
+  p->number_scheduled = 0;
+  p->runningtime = 0;
+  p->sleeptime = 0;
+  p->startingtime = 0;
+  p->tickets = 1;
+  p->timeslice = 0;
+  p->queue_number=0;
+  p->queue_state = 0;
+  p->entertime_queue = ticks;
+  p->completed_time_queue = 0;
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     freeproc(p);
@@ -145,6 +166,11 @@ found:
   memset(&p->context, 0, sizeof(p->context));
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
+
+  p->rtime = 0;
+  p->etime = 0;
+  p->ctime = ticks;
+ 
 
   return p;
 }
@@ -169,6 +195,7 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
+  p->queue_state=0;
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -295,10 +322,12 @@ fork(void)
     return -1;
   }
   np->sz = p->sz;
-
+  
   // copy saved user registers.
   *(np->trapframe) = *(p->trapframe);
 
+  //copy the same number of tickets for child process
+  np->tickets = p->tickets;
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
 
@@ -325,6 +354,102 @@ fork(void)
   return pid;
 }
 
+
+void initialize_queues()
+{
+    for(int i=0;i<QUEUE_COUNT ;i++)
+    {
+        QueueLevel[i].size = 0;
+        QueueLevel[i].front = 0;
+        QueueLevel[i].rear = 0;
+    }
+}
+
+int get_dynamicpriority(struct proc *p)
+{
+  //First calcaulate the niceness value and then from niceness value get the value of dynamicpriority
+  int niceness;
+  if(p->runningtime == 0 && p->sleeptime == 0)
+  {
+    niceness = 5;
+  }
+  niceness = ((p->sleeptime)*10)/(p->sleeptime+p->runningtime);
+  //The above value always lies between 0 and 10 
+  if(niceness == 5)
+  {
+      return  p->static_priority;
+  }
+  else
+  {
+      if(p->static_priority-niceness+5<0)
+      {
+          return 0;
+      }
+      else
+      {
+          if(p->static_priority-niceness+5>100)
+          {
+            return 100;
+          }
+          else
+          {
+              return p->static_priority-niceness+5;
+          }
+      }
+  }
+
+    
+}
+
+
+int set_priority(int new_priority,int pid)
+{
+   /* This system call is used to set the static prority of a process to new_priority.
+      Return value
+      *on successful returns oldpriority
+      *on failure returns -1
+      Reset the niceness value to 5
+   */
+  struct proc* pro;
+  int old_priority=-1;
+
+  for(pro = proc ;pro<&proc[NPROC]; pro++)
+  {
+      acquire(&pro->lock);
+
+      if(pro->pid == pid)
+      {
+        old_priority = pro->static_priority;
+        pro->static_priority = new_priority;
+        pro->sleeptime  = 0;
+        pro->runningtime = 0;
+      }
+
+      release(&pro->lock);
+  }
+
+  //if old_priority is not changed it returns -1 else it returns old static value of the priority
+  return old_priority;
+
+}
+
+int set_tickets(int tickets)
+{
+     struct proc* p =myproc();
+
+     if(tickets < 1)
+     {
+      return -1;
+     }
+
+     acquire(&p->lock);
+     p->tickets = tickets;
+     p->timeslice = tickets;
+     release(&p->lock);
+
+     return 1;
+
+}
 // Pass p's abandoned children to init.
 // Caller must hold wait_lock.
 void
@@ -377,6 +502,7 @@ exit(int status)
 
   p->xstate = status;
   p->state = ZOMBIE;
+  p->etime = ticks;
 
   release(&wait_lock);
 
@@ -448,10 +574,32 @@ scheduler(void)
   struct cpu *c = mycpu();
   
   c->proc = 0;
+
+  scheduler_number = 0;
+  
+  #ifdef FCFS
+  scheduler_number = 1;
+  #endif
+
+  #ifdef PBS
+  scheduler_number = 2;
+  #endif
+
+  #ifdef MLFQ
+  scheduler_number = 4;
+  #endif
+
+  #ifdef LBS
+  scheduler_number = 3;
+  #endif
+
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
-    intr_on();
-
+ 
+  intr_on();
+  if(scheduler_number == 0)
+  {
+    
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
@@ -459,6 +607,9 @@ scheduler(void)
         // to release its lock and then reacquire it
         // before jumping back to us.
         p->state = RUNNING;
+        p->sleeptime = 0;
+        p->runningtime = 0;
+        p->number_scheduled++;
         c->proc = p;
         swtch(&c->context, &p->context);
 
@@ -469,6 +620,251 @@ scheduler(void)
       release(&p->lock);
     }
   }
+  else if(scheduler_number == 1)
+  {
+
+   
+    //Implementation of FCFS scheduling mechanism
+    
+      //Assign the process which has lowest creation time
+      struct proc* mintime_process = 0;
+       stat_c = -1;
+      for(p = proc;p < &proc[NPROC] ; p++)
+      {
+          acquire(&p->lock);
+          stat_c = -1;
+          if(p->state == RUNNABLE)
+          {
+            
+            if(mintime_process !=0)
+            {
+
+              if(p->creation_time < mintime_process->creation_time)
+              {
+                release(&mintime_process->lock);
+                stat_c = 1;
+                mintime_process = p;
+              }
+            }
+            else
+            {
+              mintime_process = p;
+              stat_c = 1;
+            }
+         
+          }
+
+          if(stat_c == -1)
+          {
+            release(&p->lock);
+          }
+
+      }
+       
+      if(mintime_process!=0)
+      {
+        mintime_process->runningtime = 0;
+        mintime_process->sleeptime = 0;
+        mintime_process->startingtime = ticks;
+        mintime_process->state = RUNNING;
+         
+        c->proc = mintime_process;
+        swtch(&c->context, &mintime_process->context);
+
+        // Process is done running for now.
+        // It should have changed its p->state before coming back.
+        c->proc = 0; 
+        release(&mintime_process->lock);
+      }
+            
+    }
+    else if(scheduler_number == 2)
+    {
+      //Implementation of PBS Scheduling
+
+      //priority should be given on the basis of dynamic priority 
+      //if dynamic priority of two processes are same then priority should be given based on number of times scheduled
+      //if number of times scheduled is same then priority should be given based on creation time
+
+      struct proc* bestprocess = 0;
+      stat_c = 0;
+
+      for(p=proc;p< &proc[NPROC]; p++)
+      {
+          acquire(&p->lock);
+          if(stat_c != 0)
+          {
+          stat_c = -1;
+          }
+          if(p->state == RUNNABLE)
+          {
+          if(stat_c == 0)
+          {
+              bestprocess = p;
+              stat_c = 1;
+          }
+          else
+          {
+              int dp_morepriorityprocess;
+              int dp_currentpriorityprocess;
+              int c=0;
+             dp_morepriorityprocess=get_dynamicpriority(bestprocess);
+             dp_currentpriorityprocess=get_dynamicpriority(p);
+             if(dp_currentpriorityprocess < dp_morepriorityprocess)
+             {
+                c=1;
+             }
+             else if(dp_currentpriorityprocess == dp_morepriorityprocess)
+             {
+                 if(p->number_scheduled < bestprocess->number_scheduled)
+                 {
+                    c=1;
+                 }
+                 else if(p->number_scheduled == bestprocess->number_scheduled)
+                 {
+                    if(p->creation_time < bestprocess->creation_time)
+                    {
+                        c=1;
+                    }
+                 }
+             }
+
+             if(c == 1)
+             {
+               
+                release(&bestprocess->lock);
+                stat_c = 1;
+                bestprocess = p;
+             }
+          }
+          }
+           if(stat_c == -1 || stat_c == 0)
+          {
+            release(&p->lock);
+          }
+      }
+
+
+          if(bestprocess!=0)
+      {
+        bestprocess->state = RUNNING;
+        bestprocess->sleeptime = 0;
+        bestprocess->runningtime = 0;
+        bestprocess->number_scheduled++;
+        c->proc = bestprocess;
+        swtch(&c->context, &bestprocess->context);
+
+        // Process is done running for now.
+        // It should have changed its p->state before coming back.
+        c->proc = 0; 
+        release(&bestprocess->lock);
+      }
+
+
+
+    }
+    else if(scheduler_number == 3)
+    {
+      //Implememtation of LBS Scheduling
+
+      for(p = proc; p < &proc[NPROC]; p++) {
+      acquire(&p->lock);
+      if(p->state == RUNNABLE) {
+        // Switch to chosen process.  It is the process's job
+        // to release its lock and then reacquire it
+        // before jumping back to us.
+        p->state = RUNNING;
+        p->sleeptime = 0;
+        p->runningtime = 0;
+        p->number_scheduled++;
+
+        c->proc = p;
+        swtch(&c->context, &p->context);
+        p->timeslice = p->tickets;
+
+        // Process is done running for now.
+        // It should have changed its p->state before coming back.
+        c->proc = 0;
+      }
+      release(&p->lock);
+    }
+
+
+
+
+
+    }
+    else if(scheduler_number == 4)
+    {
+      //Implementation of MultiLevel feedback queue scheduling
+
+
+    //first push all the processes in their respective queues
+      
+     
+      for( p = proc ; p < &proc[NPROC] ;p++)
+      {
+           if(p->state == RUNNABLE)
+           {
+               if(p->queue_state == 0)
+               {
+                  p->queue_state = 1;
+                  push_process_queue(p,&QueueLevel[p->queue_number]);
+
+               }
+           }
+      }
+
+      int j = 0;
+      while(j < QUEUE_COUNT)
+      {
+        
+        struct proc *cur = 0;
+        while(!isempty_queue(&QueueLevel[j]))
+        {   
+            cur = pop_process_queue(&QueueLevel[j]);
+            cur->queue_state = 0;
+            if(cur->state == RUNNABLE)
+            {
+                break;
+            }
+        }
+        if(cur)
+        {
+
+           // before jumping back to us.
+        cur->state = RUNNING;
+        cur->entertime_queue = ticks;
+        cur->sleeptime = 0;
+        cur->runningtime = 0;
+        cur->number_scheduled++;
+        c->proc = cur;
+        swtch(&c->context, &cur->context);
+
+        // Process is done running for now.
+        // It should have changed its p->state before coming back.
+        c->proc = 0;
+        cur->entertime_queue = ticks;
+        }
+
+        j++;
+      }
+
+      
+
+
+    
+      
+    
+
+      
+
+
+    }
+  }
+
+
+
 }
 
 // Switch to scheduler.  Must hold only p->lock
@@ -483,7 +879,6 @@ sched(void)
 {
   int intena;
   struct proc *p = myproc();
-
   if(!holding(&p->lock))
     panic("sched p->lock");
   if(mycpu()->noff != 1)
@@ -493,6 +888,7 @@ sched(void)
   if(intr_get())
     panic("sched interruptible");
 
+      
   intena = mycpu()->intena;
   swtch(&p->context, &mycpu()->context);
   mycpu()->intena = intena;
@@ -681,3 +1077,125 @@ procdump(void)
     printf("\n");
   }
 }
+
+void push_process_queue(struct proc *p, struct Queue *level)
+{
+    if(level->size == NPROC)
+    {
+        panic("Size of the Queue is full");
+    }
+    else
+    {
+      level->size = level->size+1;
+      level->process[level->rear] = p;
+      level->rear=(level->rear+1)%(NPROC+1);   
+    }
+}
+
+int isempty_queue(struct Queue *level)
+{
+      if(level->size == 0)
+    {
+      return 1;
+    }
+    else
+    {
+      return 0;
+    }
+}
+
+
+struct proc *pop_process_queue(struct Queue *level)
+{
+    struct proc*p;
+    p=level->process[level->front];
+    level->front=(level->front+1)%(NPROC+1);
+    level->size--;
+    return p;
+}
+
+void remove_process_queue(struct Queue* level ,int pid)
+{
+
+  int reached=0;
+
+  for(int i = level->front;i !=level->rear;i=(i+1)%(NPROC+1))
+  {
+      if(reached==0&&level->process[i]->pid == pid)
+      {
+          reached = 1;
+      }
+      else{
+       level->process[i] = level->process[(i+1)%(NPROC+1)];
+      }
+  }
+
+  level->size = level->size - 1;
+  level->rear=(level->rear+NPROC)%(NPROC+1);
+    
+}
+
+int
+waitx(uint64 addr, uint* wtime, uint* rtime)
+{
+  struct proc *np;
+  int havekids, pid;
+  struct proc *p = myproc();
+
+  acquire(&wait_lock);
+
+  for(;;){
+    // Scan through table looking for exited children.
+    havekids = 0;
+    for(np = proc; np < &proc[NPROC]; np++){
+      if(np->parent == p){
+        // make sure the child isn't still in exit() or swtch().
+        acquire(&np->lock);
+
+        havekids = 1;
+        if(np->state == ZOMBIE){
+          // Found one.
+          pid = np->pid;
+          *rtime = np->rtime;
+          *wtime = np->etime - np->ctime - np->rtime;
+          if(addr != 0 && copyout(p->pagetable, addr, (char *)&np->xstate,
+                                  sizeof(np->xstate)) < 0) {
+            release(&np->lock);
+            release(&wait_lock);
+            return -1;
+          }
+          freeproc(np);
+          release(&np->lock);
+          release(&wait_lock);
+          return pid;
+        }
+        release(&np->lock);
+      }
+    }
+
+    // No point waiting if we don't have any children.
+    if(!havekids || p->killed){
+      release(&wait_lock);
+      return -1;
+    }
+
+    // Wait for a child to exit.
+    sleep(p, &wait_lock);  //DOC: wait-sleep
+  }
+}
+
+
+void
+update_time()
+{
+  struct proc* p;
+  for (p = proc; p < &proc[NPROC]; p++) {
+    acquire(&p->lock);
+    if (p->state == RUNNING) {
+      p->rtime++;
+    }
+    release(&p->lock); 
+  }
+}
+
+

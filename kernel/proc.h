@@ -25,8 +25,23 @@ struct cpu {
   int noff;                   // Depth of push_off() nesting.
   int intena;                 // Were interrupts enabled before push_off()?
 };
+extern int scheduler_number;
 
 extern struct cpu cpus[NCPU];
+
+
+struct Queue{
+ struct proc *process[NPROC+1];
+  int front;
+  int rear;
+  int size;
+};
+
+void remove_process_queue(struct Queue *level ,int pid);
+void push_process_queue(struct proc *p, struct Queue *level);
+struct proc *pop_process_queue(struct Queue *level);
+int isempty_queue(struct Queue *level);
+
 
 // per-process data for the trap handling code in trampoline.S.
 // sits in a page by itself just under the trampoline page in the
@@ -90,8 +105,15 @@ struct proc {
   void *chan;                  // If non-zero, sleeping on chan
   int killed;                  // If non-zero, have been killed
   int xstate;                  // Exit status to be returned to parent's wait
-  int pid;                     // Process ID
-
+  int pid;
+  int creation_time;
+  int runningtime;
+  int sleeptime;
+  int static_priority;
+  int number_scheduled;
+  int startingtime;
+  int tickets;
+  int timeslice;                     // Process ID
   // wait_lock must be held when using this:
   struct proc *parent;         // Parent process
 
@@ -104,4 +126,13 @@ struct proc {
   struct file *ofile[NOFILE];  // Open files
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
+
+  int queue_number;
+  int queue_state;//1 for present in queue and 0 if it is not present in queue
+  int entertime_queue; //time at which it entered the queue
+  int completed_time_queue; //time elapsed in the queue
+
+  uint rtime;                   // How long the process ran for
+  uint ctime;                   // When was the process created 
+  uint etime;                   // When did the process exited
 };

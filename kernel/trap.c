@@ -77,11 +77,44 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
-    yield();
+
+  if(scheduler_number != 1 && scheduler_number !=2)
+  {
+     if(scheduler_number == 3 || scheduler_number == 0)
+      {
+      int current = myproc()->timeslice;
+      if(current)
+      {
+         myproc()->timeslice = current - 1;
+      }
+      else
+      {
+        yield();
+      }
+      }
+      else 
+      {
+        struct proc* current_process;
+        current_process = myproc();
+        if(current_process->completed_time_queue > 1>>(current_process->queue_number))
+        {
+            if(current_process->queue_number < QUEUE_COUNT)
+            {
+               current_process->queue_number++;
+            }
+        }
+
+        yield();
+      }
+  }
 
   usertrapret();
-}
+  }
+
+
+
+  
+
 
 //
 // return to user space
@@ -152,7 +185,34 @@ kerneltrap()
 
   // give up the CPU if this is a timer interrupt.
   if(which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING)
-    yield();
+  {
+    if(scheduler_number != 1 && scheduler_number != 2)
+    {
+      if(scheduler_number == 3 || scheduler_number == 0)
+      {
+      int current = myproc()->timeslice;
+      if(current)
+      {
+         myproc()->timeslice = current - 1;
+      }
+      else 
+      {
+        struct proc* current_process;
+        current_process = myproc();
+        if(current_process->completed_time_queue > 1>>(current_process->queue_number))
+        {
+            if(current_process->queue_number < QUEUE_COUNT)
+            {
+               current_process->queue_number++;
+            }
+        }
+
+        yield();
+      }
+      }
+    }
+  }
+   
 
   // the yield() may have caused some traps to occur,
   // so restore trap registers for use by kernelvec.S's sepc instruction.
@@ -165,6 +225,7 @@ clockintr()
 {
   acquire(&tickslock);
   ticks++;
+  update_time();
   wakeup(&ticks);
   release(&tickslock);
 }
