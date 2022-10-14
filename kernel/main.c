@@ -3,7 +3,7 @@
 #include "memlayout.h"
 #include "riscv.h"
 #include "defs.h"
-#define scheduler_number 1
+#define scheduler_number 0
 
 
 volatile static int started = 0;
@@ -28,7 +28,6 @@ main()
     plicinithart();  // ask PLIC for device interrupts
     binit();         // buffer cache
     iinit();         // inode table
-    initialize_queues();
     fileinit();      // file table
     virtio_disk_init(); // emulated hard disk
     userinit();      // first user process

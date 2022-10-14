@@ -12,7 +12,7 @@ int main(int argc , char *argv[])
     }
     else
     {
-       int c = set_priority(atoi(argv[0]),atoi(argv[1]));
+       int c = set_priority(atoi(argv[1]),atoi(argv[2]));
        if(c == -2)
        {
           fprintf(2,"Incorrect priority entered\n");

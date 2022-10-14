@@ -14,7 +14,7 @@ struct proc proc[NPROC];
 
 struct proc *initproc;
 
-struct Queue QueueLevel[QUEUE_COUNT];
+
 
 //scheduling details
 int scheduler_number = 0;
@@ -132,20 +132,7 @@ allocproc(void)
   return 0;
 
 found:
-  p->creation_time = ticks;
-  p->static_priority = DEFAULT_PRIORITY;
-  p->pid = allocpid();
-  p->state = USED;
-  p->number_scheduled = 0;
-  p->runningtime = 0;
-  p->sleeptime = 0;
-  p->startingtime = 0;
-  p->tickets = 1;
-  p->timeslice = 0;
-  p->queue_number=0;
-  p->queue_state = 0;
-  p->entertime_queue = ticks;
-  p->completed_time_queue = 0;
+  
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
     freeproc(p);
@@ -170,6 +157,20 @@ found:
   p->rtime = 0;
   p->etime = 0;
   p->ctime = ticks;
+  p->creation_time = ticks;
+  p->static_priority = DEFAULT_PRIORITY;
+  p->pid = allocpid();
+  p->state = USED;
+  p->number_scheduled = 0;
+  p->sleeptime = 0;
+  p->tickets = 1;
+  p->timeslice = 0;
+  p->queueinformation.queue_number=0;
+  for(int i = 0;i < QUEUE_COUNT ;i++)
+  {
+  p->queueinformation.timespent_queuenumber[i] = 0;
+  }
+  p->queueinformation.prevscheduled_time_queue = ticks;
  
 
   return p;
@@ -195,7 +196,6 @@ freeproc(struct proc *p)
   p->killed = 0;
   p->xstate = 0;
   p->state = UNUSED;
-  p->queue_state=0;
 }
 
 // Create a user page table for a given process, with no user memory,
@@ -327,7 +327,6 @@ fork(void)
   *(np->trapframe) = *(p->trapframe);
 
   //copy the same number of tickets for child process
-  np->tickets = p->tickets;
   // Cause fork to return 0 in the child.
   np->trapframe->a0 = 0;
 
@@ -345,35 +344,28 @@ fork(void)
 
   acquire(&wait_lock);
   np->parent = p;
+  np->tickets = p->tickets;
+  np->queueinformation.queue_number=p->queueinformation.queue_number;
   release(&wait_lock);
 
   acquire(&np->lock);
   np->state = RUNNABLE;
+ 
   release(&np->lock);
 
   return pid;
 }
 
 
-void initialize_queues()
-{
-    for(int i=0;i<QUEUE_COUNT ;i++)
-    {
-        QueueLevel[i].size = 0;
-        QueueLevel[i].front = 0;
-        QueueLevel[i].rear = 0;
-    }
-}
-
 int get_dynamicpriority(struct proc *p)
 {
   //First calcaulate the niceness value and then from niceness value get the value of dynamicpriority
   int niceness;
-  if(p->runningtime == 0 && p->sleeptime == 0)
+  if(p->rtime == 0 && p->sleeptime == 0)
   {
     niceness = 5;
   }
-  niceness = ((p->sleeptime)*10)/(p->sleeptime+p->runningtime);
+  niceness = ((p->sleeptime)*10)/(p->sleeptime+p->rtime);
   //The above value always lies between 0 and 10 
   if(niceness == 5)
   {
@@ -415,17 +407,22 @@ int set_priority(int new_priority,int pid)
 
   for(pro = proc ;pro<&proc[NPROC]; pro++)
   {
-      acquire(&pro->lock);
+     
 
       if(pro->pid == pid)
       {
-        old_priority = pro->static_priority;
+        old_priority = get_dynamicpriority(pro);
         pro->static_priority = new_priority;
         pro->sleeptime  = 0;
-        pro->runningtime = 0;
+        pro->rtime = 0;
+        if(get_dynamicpriority(pro) < old_priority)
+        {
+          yield();
+        }
+        break;
       }
 
-      release(&pro->lock);
+     
   }
 
   //if old_priority is not changed it returns -1 else it returns old static value of the priority
@@ -441,11 +438,14 @@ int set_tickets(int tickets)
      {
       return -1;
      }
-
+   
+    if(p)
+    {
      acquire(&p->lock);
      p->tickets = tickets;
      p->timeslice = tickets;
      release(&p->lock);
+    }
 
      return 1;
 
@@ -593,13 +593,15 @@ scheduler(void)
   scheduler_number = 3;
   #endif
 
+  
+
   for(;;){
     // Avoid deadlock by ensuring that devices can interrupt.
- 
+  
   intr_on();
+   
   if(scheduler_number == 0)
   {
-    
     for(p = proc; p < &proc[NPROC]; p++) {
       acquire(&p->lock);
       if(p->state == RUNNABLE) {
@@ -607,8 +609,6 @@ scheduler(void)
         // to release its lock and then reacquire it
         // before jumping back to us.
         p->state = RUNNING;
-        p->sleeptime = 0;
-        p->runningtime = 0;
         p->number_scheduled++;
         c->proc = p;
         swtch(&c->context, &p->context);
@@ -663,8 +663,7 @@ scheduler(void)
        
       if(mintime_process!=0)
       {
-        mintime_process->runningtime = 0;
-        mintime_process->sleeptime = 0;
+       
         mintime_process->startingtime = ticks;
         mintime_process->state = RUNNING;
          
@@ -688,20 +687,21 @@ scheduler(void)
 
       struct proc* bestprocess = 0;
       stat_c = 0;
+      int c1=0;
 
       for(p=proc;p< &proc[NPROC]; p++)
       {
           acquire(&p->lock);
-          if(stat_c != 0)
-          {
+          
           stat_c = -1;
-          }
+          
           if(p->state == RUNNABLE)
           {
-          if(stat_c == 0)
+          if(c1 == 0)
           {
               bestprocess = p;
               stat_c = 1;
+              c1=1;
           }
           else
           {
@@ -738,7 +738,7 @@ scheduler(void)
              }
           }
           }
-           if(stat_c == -1 || stat_c == 0)
+           if(stat_c == -1)
           {
             release(&p->lock);
           }
@@ -748,8 +748,8 @@ scheduler(void)
           if(bestprocess!=0)
       {
         bestprocess->state = RUNNING;
-        bestprocess->sleeptime = 0;
-        bestprocess->runningtime = 0;
+        //bestprocess->sleeptime = 0;
+        //bestprocess->runningtime = 0;
         bestprocess->number_scheduled++;
         c->proc = bestprocess;
         swtch(&c->context, &bestprocess->context);
@@ -775,7 +775,7 @@ scheduler(void)
         // before jumping back to us.
         p->state = RUNNING;
         p->sleeptime = 0;
-        p->runningtime = 0;
+        p->rtime = 0;
         p->number_scheduled++;
 
         c->proc = p;
@@ -796,76 +796,101 @@ scheduler(void)
     }
     else if(scheduler_number == 4)
     {
-      //Implementation of MultiLevel feedback queue scheduling
-
-
-    //first push all the processes in their respective queues
       
-     
+      
+      //increase the priority of a process if it waits for more amount of time
+     //printf("hi nani\n");
       for( p = proc ; p < &proc[NPROC] ;p++)
       {
-           if(p->state == RUNNABLE)
+        //acquire(&p->lock);
+           if(p->state == RUNNABLE && ticks-p->queueinformation.prevscheduled_time_queue >= TIME_LIMIT )
            {
-               if(p->queue_state == 0)
-               {
-                  p->queue_state = 1;
-                  push_process_queue(p,&QueueLevel[p->queue_number]);
+              //process had waited more amount of time in each queue
+              //so increase the priority for this process
+              if(p->queueinformation.queue_number != 0)
+              {
+                p->queueinformation.queue_number--;
+              }
 
-               }
+              p->queueinformation.prevscheduled_time_queue=ticks;
+                
            }
-      }
 
-      int j = 0;
-      while(j < QUEUE_COUNT)
-      {
-        
-        struct proc *cur = 0;
-        while(!isempty_queue(&QueueLevel[j]))
-        {   
-            cur = pop_process_queue(&QueueLevel[j]);
-            cur->queue_state = 0;
-            if(cur->state == RUNNABLE)
-            {
-                break;
-            }
-        }
-        if(cur)
+       // release(&p->lock);
+      }
+       //printf("hi sriram\n");
+
+      
+      //int changed = 0;
+      struct proc * mlfqpro=0;
+     
+        for( p = proc;p<&proc[NPROC];p++)
         {
-
-           // before jumping back to us.
-        cur->state = RUNNING;
-        cur->entertime_queue = ticks;
-        cur->sleeptime = 0;
-        cur->runningtime = 0;
-        cur->number_scheduled++;
-        c->proc = cur;
-        swtch(&c->context, &cur->context);
-
-        // Process is done running for now.
-        // It should have changed its p->state before coming back.
-        c->proc = 0;
-        cur->entertime_queue = ticks;
+          //acquire(&p->lock);
+         // printf("hi sriram\n");
+          //changed=0;
+            if(p->state == RUNNABLE )
+            {
+             
+               // printf("hi sriram\n");
+              if(mlfqpro == 0 )
+              {
+               // printf("hi sriram1\n");
+                mlfqpro = p;
+                //changed = 1;
+                
+              }
+              else
+              {
+                printf("hi sriram\n");
+                  if(p->queueinformation.queue_number <= mlfqpro->queueinformation.queue_number)
+                  {
+                    if(p->queueinformation.queue_number < mlfqpro->queueinformation.queue_number)
+                    {
+                         // release(&mlfqpro->lock);
+                             mlfqpro = p;
+                             //changed = 1;
+                    }
+                    else if(mlfqpro->queueinformation.prevscheduled_time_queue > p->queueinformation.prevscheduled_time_queue)
+                       {
+                            // release(&mlfqpro->lock);
+                             mlfqpro = p;
+                             //changed = 1;
+                       }
+                  }
+              }
+              
+            }
+          
+          //release(&p->lock);
         }
+        
 
-        j++;
+        
+             if(!mlfqpro)
+             {
+              acquire(&mlfqpro->lock);
+                if(mlfqpro->state == RUNNABLE)
+                  {
+                    mlfqpro->number_scheduled+=1;
+                    mlfqpro->queueinformation.prevscheduled_time_queue=ticks;
+                    mlfqpro->queueinformation.timespent_queuenumber[mlfqpro->queueinformation.queue_number]+=(1<<mlfqpro->queueinformation.queue_number);
+                    mlfqpro->state = RUNNING;
+                    c->proc=mlfqpro;
+                    swtch(&c->context, &mlfqpro->context);
+                    c->proc = 0;
+                  }
+                  release(&mlfqpro->lock);
+             }
+           
       }
-
-      
-
-
-    
-      
-    
-
-      
-
 
     }
   }
 
 
 
-}
+
 
 // Switch to scheduler.  Must hold only p->lock
 // and have changed proc->state. Saves and restores
@@ -946,6 +971,7 @@ sleep(void *chan, struct spinlock *lk)
   // Go to sleep.
   p->chan = chan;
   p->state = SLEEPING;
+  p->sleeptime=ticks;
 
   sched();
 
@@ -969,6 +995,7 @@ wakeup(void *chan)
       acquire(&p->lock);
       if(p->state == SLEEPING && p->chan == chan) {
         p->state = RUNNABLE;
+        p->sleeptime=ticks-p->sleeptime;
       }
       release(&p->lock);
     }
@@ -1078,62 +1105,7 @@ procdump(void)
   }
 }
 
-void push_process_queue(struct proc *p, struct Queue *level)
-{
-    if(level->size == NPROC)
-    {
-        panic("Size of the Queue is full");
-    }
-    else
-    {
-      level->size = level->size+1;
-      level->process[level->rear] = p;
-      level->rear=(level->rear+1)%(NPROC+1);   
-    }
-}
 
-int isempty_queue(struct Queue *level)
-{
-      if(level->size == 0)
-    {
-      return 1;
-    }
-    else
-    {
-      return 0;
-    }
-}
-
-
-struct proc *pop_process_queue(struct Queue *level)
-{
-    struct proc*p;
-    p=level->process[level->front];
-    level->front=(level->front+1)%(NPROC+1);
-    level->size--;
-    return p;
-}
-
-void remove_process_queue(struct Queue* level ,int pid)
-{
-
-  int reached=0;
-
-  for(int i = level->front;i !=level->rear;i=(i+1)%(NPROC+1))
-  {
-      if(reached==0&&level->process[i]->pid == pid)
-      {
-          reached = 1;
-      }
-      else{
-       level->process[i] = level->process[(i+1)%(NPROC+1)];
-      }
-  }
-
-  level->size = level->size - 1;
-  level->rear=(level->rear+NPROC)%(NPROC+1);
-    
-}
 
 int
 waitx(uint64 addr, uint* wtime, uint* rtime)

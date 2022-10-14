@@ -30,17 +30,6 @@ extern int scheduler_number;
 extern struct cpu cpus[NCPU];
 
 
-struct Queue{
- struct proc *process[NPROC+1];
-  int front;
-  int rear;
-  int size;
-};
-
-void remove_process_queue(struct Queue *level ,int pid);
-void push_process_queue(struct proc *p, struct Queue *level);
-struct proc *pop_process_queue(struct Queue *level);
-int isempty_queue(struct Queue *level);
 
 
 // per-process data for the trap handling code in trampoline.S.
@@ -96,6 +85,8 @@ struct trapframe {
 
 enum procstate { UNUSED, USED, SLEEPING, RUNNABLE, RUNNING, ZOMBIE };
 
+typedef struct Queuestatus queueinformation;
+
 // Per-process state
 struct proc {
   struct spinlock lock;
@@ -107,7 +98,6 @@ struct proc {
   int xstate;                  // Exit status to be returned to parent's wait
   int pid;
   int creation_time;
-  int runningtime;
   int sleeptime;
   int static_priority;
   int number_scheduled;
@@ -127,12 +117,17 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 
-  int queue_number;
-  int queue_state;//1 for present in queue and 0 if it is not present in queue
-  int entertime_queue; //time at which it entered the queue
-  int completed_time_queue; //time elapsed in the queue
-
   uint rtime;                   // How long the process ran for
   uint ctime;                   // When was the process created 
-  uint etime;                   // When did the process exited
+  uint etime;  
+  
+                   // When did the process exited
+
+  struct Queuestatus{
+  int queue_number; // can be any number between 0 and 4;
+  int timespent_queuenumber[QUEUE_COUNT];
+  int Size_queuenumber[QUEUE_COUNT];
+  int prevscheduled_time_queue; //time elapsed in the queue
+  }queueinformation;
+
 };

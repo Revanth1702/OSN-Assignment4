@@ -13,3 +13,4 @@
 #define MAXPATH          128   // maximum file path name
 #define DEFAULT_PRIORITY 60
 #define QUEUE_COUNT      5
+#define TIME_LIMIT       15

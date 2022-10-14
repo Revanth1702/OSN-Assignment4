@@ -77,10 +77,13 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-
-  if(scheduler_number != 1 && scheduler_number !=2)
+  if(which_dev == 2  &&(scheduler_number != 1 && scheduler_number !=2))
   {
-     if(scheduler_number == 3 || scheduler_number == 0)
+    if(scheduler_number == 0)
+    {
+      yield();
+    }
+    else if(scheduler_number == 3 )
       {
       int current = myproc()->timeslice;
       if(current)
@@ -94,17 +97,20 @@ usertrap(void)
       }
       else 
       {
-        struct proc* current_process;
-        current_process = myproc();
-        if(current_process->completed_time_queue > 1>>(current_process->queue_number))
+        struct proc* cur_pro=0;
+        cur_pro = myproc();
+        
+        if(ticks-cur_pro->queueinformation.timespent_queuenumber[cur_pro->queueinformation.queue_number] > 1>>(cur_pro->queueinformation.queue_number))
         {
-            if(current_process->queue_number < QUEUE_COUNT)
+            if(cur_pro->queueinformation.queue_number != 4)
             {
-               current_process->queue_number++;
+              cur_pro->queueinformation.queue_number++;
             }
-        }
+              cur_pro->queueinformation.prevscheduled_time_queue = ticks;
+              yield();
 
-        yield();
+        }
+        
       }
   }
 
@@ -171,49 +177,58 @@ kerneltrap()
   uint64 sepc = r_sepc();
   uint64 sstatus = r_sstatus();
   uint64 scause = r_scause();
+
+  
   
   if((sstatus & SSTATUS_SPP) == 0)
     panic("kerneltrap: not from supervisor mode");
   if(intr_get() != 0)
     panic("kerneltrap: interrupts enabled");
 
+ 
   if((which_dev = devintr()) == 0){
     printf("scause %p\n", scause);
     printf("sepc=%p stval=%p\n", r_sepc(), r_stval());
     panic("kerneltrap");
   }
+   
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2 && myproc() != 0 && myproc()->state == RUNNING)
+ if(which_dev == 2 &&myproc()!=0&& myproc()->state == RUNNING &&(scheduler_number != 1 && scheduler_number !=2))
   {
-    if(scheduler_number != 1 && scheduler_number != 2)
+    if(scheduler_number == 0)
     {
-      if(scheduler_number == 3 || scheduler_number == 0)
+      yield();
+    }
+    else if(scheduler_number == 3 )
       {
       int current = myproc()->timeslice;
       if(current)
       {
          myproc()->timeslice = current - 1;
       }
-      else 
+      else
       {
-        struct proc* current_process;
-        current_process = myproc();
-        if(current_process->completed_time_queue > 1>>(current_process->queue_number))
-        {
-            if(current_process->queue_number < QUEUE_COUNT)
-            {
-               current_process->queue_number++;
-            }
-        }
-
         yield();
       }
       }
-    }
-  }
-   
+      else 
+      {
+        struct proc* cur_pro=0;
+        cur_pro = myproc();
+        
+        if(ticks-cur_pro->queueinformation.timespent_queuenumber[cur_pro->queueinformation.queue_number] >= 1>>(cur_pro->queueinformation.queue_number))
+        {
+            if(cur_pro->queueinformation.queue_number != 4)
+            {
+              cur_pro->queueinformation.queue_number++;
+            }
+              cur_pro->queueinformation.prevscheduled_time_queue = ticks;
+              yield();
 
+        }
+      }
+  }
   // the yield() may have caused some traps to occur,
   // so restore trap registers for use by kernelvec.S's sepc instruction.
   w_sepc(sepc);

@@ -19,17 +19,18 @@ int main() {
           if (n < IO) {
             sleep(200); // IO bound processes
           } else {
-            for (int i = 0; i < 10000000; i++) {}; // CPU bound process
+            for (int i = 0; i < 10000; i++) { printf("h");}; // CPU bound process
           }
           // printf("Process %d finished", n);
           exit(0);
       } else {
 #ifdef PBS
-        setpriority(60-IO+n, pid); // Will only matter for PBS, set lower priority for IO bound processes 
+        set_priority(60-IO+n, pid); // Will only matter for PBS, set lower priority for IO bound processes 
 #endif
       }
   }
   for(;n > 0; n--) {
+    printf("h\n");
       if(waitx(0,&wtime,&rtime) >= 0) {
           trtime += rtime;
           twtime += wtime;
