@@ -77,14 +77,15 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2  &&(scheduler_number != 1 && scheduler_number !=2))
+  if(which_dev == 2 )
   {
-    if(scheduler_number == 0)
-    {
+     
+    #ifdef RR
+   
       yield();
-    }
-    else if(scheduler_number == 3 )
-      {
+    #endif
+    #ifdef PBS
+      
       int current = myproc()->timeslice;
       if(current)
       {
@@ -94,13 +95,12 @@ usertrap(void)
       {
         yield();
       }
-      }
-      else 
-      {
+    #endif
+      #ifdef MLFQ
         struct proc* cur_pro=0;
         cur_pro = myproc();
-        
-        if(ticks-cur_pro->queueinformation.timespent_queuenumber[cur_pro->queueinformation.queue_number] > 1>>(cur_pro->queueinformation.queue_number))
+        //printf("hi sriram\n");
+        if(ticks-cur_pro->queueinformation.prevscheduled_time_queue >= 1>>(cur_pro->queueinformation.queue_number))
         {
             if(cur_pro->queueinformation.queue_number != 4)
             {
@@ -110,8 +110,8 @@ usertrap(void)
               yield();
 
         }
-        
-      }
+      #endif
+  
   }
 
   usertrapret();
@@ -194,14 +194,16 @@ kerneltrap()
    
 
   // give up the CPU if this is a timer interrupt.
- if(which_dev == 2 &&myproc()!=0&& myproc()->state == RUNNING &&(scheduler_number != 1 && scheduler_number !=2))
+  
+ if(which_dev == 2 && myproc()!=0 && myproc()->state == RUNNING )
   {
-    if(scheduler_number == 0)
-    {
+    
+    #ifdef RR
+   
       yield();
-    }
-    else if(scheduler_number == 3 )
-      {
+    #endif
+    #ifdef PBS
+      
       int current = myproc()->timeslice;
       if(current)
       {
@@ -211,13 +213,12 @@ kerneltrap()
       {
         yield();
       }
-      }
-      else 
-      {
+    #endif
+      #ifdef MLFQ
         struct proc* cur_pro=0;
         cur_pro = myproc();
-        
-        if(ticks-cur_pro->queueinformation.timespent_queuenumber[cur_pro->queueinformation.queue_number] >= 1>>(cur_pro->queueinformation.queue_number))
+        //printf("hi sriram\n");
+        if(ticks-cur_pro->queueinformation.prevscheduled_time_queue >= 1>>(cur_pro->queueinformation.queue_number))
         {
             if(cur_pro->queueinformation.queue_number != 4)
             {
@@ -227,7 +228,7 @@ kerneltrap()
               yield();
 
         }
-      }
+      #endif
   }
   // the yield() may have caused some traps to occur,
   // so restore trap registers for use by kernelvec.S's sepc instruction.

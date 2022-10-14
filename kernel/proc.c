@@ -132,6 +132,18 @@ allocproc(void)
   return 0;
 
 found:
+  p->rtime = 0;
+  p->etime = 0;
+  p->ctime = ticks;
+  p->creation_time = ticks;
+  p->static_priority = DEFAULT_PRIORITY;
+  p->pid = allocpid();
+  p->state = USED;
+  p->number_scheduled = 0;
+  p->sleeptime = 0;
+  p->tickets = 1;
+  p->timeslice = 0;
+  p->queueinformation.queue_number=0;
   
   // Allocate a trapframe page.
   if((p->trapframe = (struct trapframe *)kalloc()) == 0){
@@ -154,18 +166,6 @@ found:
   p->context.ra = (uint64)forkret;
   p->context.sp = p->kstack + PGSIZE;
 
-  p->rtime = 0;
-  p->etime = 0;
-  p->ctime = ticks;
-  p->creation_time = ticks;
-  p->static_priority = DEFAULT_PRIORITY;
-  p->pid = allocpid();
-  p->state = USED;
-  p->number_scheduled = 0;
-  p->sleeptime = 0;
-  p->tickets = 1;
-  p->timeslice = 0;
-  p->queueinformation.queue_number=0;
   for(int i = 0;i < QUEUE_COUNT ;i++)
   {
   p->queueinformation.timespent_queuenumber[i] = 0;
@@ -809,7 +809,8 @@ scheduler(void)
               //so increase the priority for this process
               if(p->queueinformation.queue_number != 0)
               {
-                p->queueinformation.queue_number--;
+                  p->queueinformation.timespent_queuenumber[ p->queueinformation.queue_number]+=(ticks-p->queueinformation.prevscheduled_time_queue);
+                  p->queueinformation.queue_number--;
               }
 
               p->queueinformation.prevscheduled_time_queue=ticks;
@@ -818,15 +819,15 @@ scheduler(void)
 
        // release(&p->lock);
       }
-       //printf("hi sriram\n");
+      
 
       
       //int changed = 0;
       struct proc * mlfqpro=0;
-     
+      
         for( p = proc;p<&proc[NPROC];p++)
         {
-          //acquire(&p->lock);
+          acquire(&p->lock);
          // printf("hi sriram\n");
           //changed=0;
             if(p->state == RUNNABLE )
@@ -842,7 +843,7 @@ scheduler(void)
               }
               else
               {
-                printf("hi sriram\n");
+               
                   if(p->queueinformation.queue_number <= mlfqpro->queueinformation.queue_number)
                   {
                     if(p->queueinformation.queue_number < mlfqpro->queueinformation.queue_number)
@@ -862,21 +863,21 @@ scheduler(void)
               
             }
           
-          //release(&p->lock);
+          release(&p->lock);
         }
         
 
         
              if(!mlfqpro)
              {
-              acquire(&mlfqpro->lock);
+                acquire(&mlfqpro->lock);
                 if(mlfqpro->state == RUNNABLE)
                   {
                     mlfqpro->number_scheduled+=1;
                     mlfqpro->queueinformation.prevscheduled_time_queue=ticks;
-                    mlfqpro->queueinformation.timespent_queuenumber[mlfqpro->queueinformation.queue_number]+=(1<<mlfqpro->queueinformation.queue_number);
+                      mlfqpro->queueinformation.timespent_queuenumber[mlfqpro->queueinformation.queue_number]+=(1<<mlfqpro->queueinformation.queue_number);
+                      c->proc=mlfqpro;
                     mlfqpro->state = RUNNING;
-                    c->proc=mlfqpro;
                     swtch(&c->context, &mlfqpro->context);
                     c->proc = 0;
                   }
